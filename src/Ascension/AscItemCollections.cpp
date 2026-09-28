@@ -349,8 +349,15 @@ namespace
         if (static_cast<uint8_t>(a) != 0 || *reinterpret_cast<const uint32_t*>(unit + 0x14) != 4 || unit == ActivePlayer())
             return r;
         const uint8_t* d = *reinterpret_cast<uint8_t* const*>(unit + 8);
+        // 0xC5D828 is the item cache OBJECT itself, not a pointer to one: the client loads it with
+        // "mov $0xC5D828,%ecx" (0x50BB0C before the same getter), and every other module passes the address
+        // (AscAttachFixes, AscSmallApis, AscSpellTokens, AscTooltipScaling, AscGlobalsB/C, AscAssetQuery).
+        // Dereferencing it passed the object's first field (a heap pointer) as the cache, so the client's
+        // hash lookup read its bucket array and mask from the wrong object and followed a garbage chain
+        // (crash 2026-09-28 18:49:00: ACCESS_VIOLATION at Ascension.exe 0x6F6058, reading 0x0C468B00, on the
+        // first other player with a ranged item after entering Warsong Gulch).
         const uint8_t* item = reinterpret_cast<const uint8_t*(__thiscall*)(void*, uint32_t, int, int, int, int)>(0x67CA30)(
-            *reinterpret_cast<void* const*>(0xC5D828), *reinterpret_cast<const uint32_t*>(d + 0x4EC), 0, 0, 0, 0);
+            reinterpret_cast<void*>(0xC5D828), *reinterpret_cast<const uint32_t*>(d + 0x4EC), 0, 0, 0, 0);
         if (!item || *reinterpret_cast<const uint32_t*>(item + 4) != 2 || *reinterpret_cast<const uint32_t*>(item + 8) != 2)
             return r;
         strcpy(reinterpret_cast<char*>(0xB6B600), "Item\\ObjectComponents\\Quiver\\Quiver_A.mdx");
