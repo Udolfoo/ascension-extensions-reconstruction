@@ -86,13 +86,17 @@ namespace
         const uint64_t* bags = reinterpret_cast<const uint64_t*>(0xC23540);
         for (uint32_t b = 0; b < 4; ++b)
         {
-            uint8_t* container = static_cast<uint8_t*>(ObjectPtr(bags[b], 4));
-            if (!container)
+            uint8_t* bag = static_cast<uint8_t*>(ObjectPtr(bags[b], 4));
+            if (!bag)
                 continue;
             typedef void*(__thiscall* Inventory_t)(void*);
-            if (!(*reinterpret_cast<Inventory_t**>(container))[0x24 / 4](container))
+            // The object looked up by the bag GUID is the BAG; 0x754390 needs the container returned by its
+            // vtable +0x24 (same as CountInBags / RefreshInventory). Passing the bag crashed the client
+            // (2026-09-28 16:05:48) - see the note in AscAttachFixes.cpp CountItem.
+            void* container = (*reinterpret_cast<Inventory_t**>(bag))[0x24 / 4](bag);
+            if (!container)
                 continue;
-            const uint32_t slots = *reinterpret_cast<const uint32_t*>(*reinterpret_cast<uint8_t**>(container + 8) + 0x100);
+            const uint32_t slots = *reinterpret_cast<const uint32_t*>(*reinterpret_cast<uint8_t**>(bag + 8) + 0x100);
             for (uint32_t i = 0; i < slots; ++i)
                 if (uint8_t* it = reinterpret_cast<uint8_t*(__thiscall*)(void*, uint32_t)>(0x754390)(container, i))
                     if (entry(it) == item)

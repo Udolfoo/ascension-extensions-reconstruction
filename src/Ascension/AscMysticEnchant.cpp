@@ -280,10 +280,14 @@ namespace
             }
         for (uint32_t b = 0; b < 4; ++b)
         {
-            uint8_t* container = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
-            if (!container || !ContainerInventory(container))
+            // ObjectPtr(guid, 4) is the BAG object; 0x754390 (ContainerItem) needs the container its
+            // vtable +0x24 returns, not the bag itself. Passing the bag crashed the client on
+            // 2026-09-28 16:05:48 - see the note in AscAttachFixes.cpp CountItem.
+            uint8_t* bagObj = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
+            uint8_t* container = bagObj ? static_cast<uint8_t*>(ContainerInventory(bagObj)) : nullptr;
+            if (!container)
                 continue;
-            for (uint32_t i = 0; i < ContainerSlots(container); ++i)
+            for (uint32_t i = 0; i < ContainerSlots(bagObj); ++i)
             {
                 uint8_t* it = ContainerItem(container, i);
                 if (it && GuidOf(it) == guid)
@@ -316,10 +320,12 @@ namespace
                 items.push_back(item);
         for (uint32_t b = 0; b < 4; ++b)
         {
-            uint8_t* container = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
-            if (!container || !ContainerInventory(container))
+            // ObjectPtr(guid, 4) is the BAG; the container from its vtable +0x24 is what 0x754390 takes.
+            uint8_t* bag = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
+            uint8_t* container = bag ? static_cast<uint8_t*>(ContainerInventory(bag)) : nullptr;
+            if (!container)
                 continue;
-            for (uint32_t i = 0; i < ContainerSlots(container); ++i)
+            for (uint32_t i = 0; i < ContainerSlots(bag); ++i)
                 if (uint8_t* item = ContainerItem(container, i))
                     items.push_back(item);
         }
@@ -360,10 +366,12 @@ namespace
                 ++n;
         for (uint32_t b = 0; b < 4; ++b)
         {
-            uint8_t* container = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
-            if (!container || !ContainerInventory(container))
+            // ObjectPtr(guid, 4) is the BAG; the container from its vtable +0x24 is what 0x754390 takes.
+            uint8_t* bag = static_cast<uint8_t*>(ObjectPtr(BagGuids()[b], 4));
+            uint8_t* container = bag ? static_cast<uint8_t*>(ContainerInventory(bag)) : nullptr;
+            if (!container)
                 continue;
-            for (uint32_t i = 0; i < ContainerSlots(container); ++i)
+            for (uint32_t i = 0; i < ContainerSlots(bag); ++i)
                 if (!ContainerItem(container, i))
                     ++n;
         }

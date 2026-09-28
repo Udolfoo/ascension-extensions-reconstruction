@@ -817,12 +817,18 @@ namespace
             if (!bag)
                 continue;
             void** vt = *reinterpret_cast<void***>(bag);
-            if (!reinterpret_cast<int(__thiscall*)(void*)>(vt[0x24 / 4])(bag))
+            // vtable +0x24 on a bag returns its CONTAINER ({count at +0, GUID array at +4}); 0x754390 takes
+            // that container as `this`, not the bag object - see CountInBags (AscSmallApis.cpp:324) and
+            // RefreshInventory (AscClientDbcPatch.cpp:191), which both pass the container. Passing the bag
+            // made 0x754390 read {count, data} out of the bag object and dereference a dangling pointer
+            // (crash 2026-09-28 16:05:48, ESI/ECX out of [bag+4]).
+            void* container = reinterpret_cast<void*(__thiscall*)(void*)>(vt[0x24 / 4])(bag);
+            if (!container)
                 continue;
             const uint32_t slots = *reinterpret_cast<const uint32_t*>(*reinterpret_cast<const uint8_t* const*>(bag + 8) + 0x100);
             for (uint32_t k = 0; k < slots; ++k)
             {
-                const uint8_t* it = reinterpret_cast<const uint8_t*(__thiscall*)(void*, uint32_t)>(0x754390)(bag, k);
+                const uint8_t* it = reinterpret_cast<const uint8_t*(__thiscall*)(void*, uint32_t)>(0x754390)(container, k);
                 if (it && *reinterpret_cast<const uint32_t*>(*reinterpret_cast<const uint8_t* const*>(it + 8) + 0xC) == item)
                     n += *reinterpret_cast<const int32_t*>(*reinterpret_cast<const uint8_t* const*>(it + 8) + 0x38);
             }
