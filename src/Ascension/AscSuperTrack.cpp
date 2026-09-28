@@ -29,6 +29,7 @@
 #include <Ascension/AscBindings.hpp>
 #include <Ascension/AscRuntime.hpp>
 #include <Ascension/AscScript.hpp>
+#include <Windows.h>
 #include <cmath>
 
 using namespace AscScript;
@@ -53,6 +54,36 @@ namespace
     uint32_t g_lastQuest = 0;   // 0x10D3C1A8
     CVar* g_visited = nullptr;   // 0x10D3C1A4 "VisitedSuperTracks"
     uint32_t g_timers[3] = {};  // 0x10D3C18C / 190 / 194
+
+    // The client keeps its CVars in a movable arena: CVar::Lookup (0x55F4D0, container 0xCA19FC) walks a
+    // hash chain of *relative* offsets, so registering one more CVar moves every CVar object. An absolute
+    // pointer cached across such a move points into the old, freed block - on 2026-09-28 17:47:13 the client
+    // read the float 0x3E680000 (0.2265625f) from the callback slot +0x68 of such an object and jumped into
+    // it (Ascension.exe 0x7668EC, reached from QuestChangeTick). Resolve the CVar before every use; the
+    // cached global (0x10D3C1A4) keeps the live pointer.
+    CVar* VisitedCVar()
+    {
+        g_visited = CVar::Lookup("VisitedSuperTracks");
+        return g_visited;
+    }
+
+    // The client calls a CVar's change callback (object +0x68, its argument +0x6C) whenever the value is set
+    // with the notify flag, and faults if that slot does not point at executable code - its own diagnostic
+    // is "Invalid function pointer: %p" (0x86B5A0). Clear such a pointer so the client skips the callback
+    // and still stores the value instead of crashing; the value is logged once per occurrence.
+    void DropBrokenCallback(CVar* cvar)
+    {
+        void** slot = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cvar) + 0x68);
+        void* fn = *slot;
+        if (!fn)
+            return;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(fn, &mbi, sizeof mbi) != 0 && mbi.State == MEM_COMMIT &&
+            (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+            return;
+        AscLog::Printf("VisitedSuperTracks: CVar callback 0x%p is not executable - dropped (cvar 0x%p)", fn, cvar);
+        *slot = nullptr;
+    }
 
     int32_t CurrentMap() { return *reinterpret_cast<const int32_t*>(0xBD088C); }
 
@@ -121,6 +152,7 @@ namespace
             buffer[0] = 0x76;
             buffer[1] = 0x01;
             buffer[index] = 0;
+            DropBrokenCallback(cvar);
             reinterpret_cast<void(__thiscall*)(CVar*, const char*, int, int, int, int)>(0x7668C0)(cvar, buffer, 1, 0, 0, 1);
         }
     };
@@ -128,9 +160,10 @@ namespace
 
     bool Visited(uint32_t id)   // FUN_10335020
     {
-        if (!g_visited)
+        CVar* cvar = VisitedCVar();
+        if (!cvar)
             return false;
-        IntList list(g_visited);
+        IntList list(cvar);
         for (uint32_t v = list.Next(); v; v = list.Next())
             if (v == id)
                 return true;
@@ -144,18 +177,19 @@ namespace
             AscLog::Printf("AddSuperTrackToVisitedList.id >=  MAX_CVAR_INT_LIST_VALUE");
             return;
         }
-        if (!g_visited || Visited(id))
+        CVar* cvar = VisitedCVar();
+        if (!cvar || Visited(id))
             return;
         std::vector<uint32_t> ids;
         {
-            IntList read(g_visited);
+            IntList read(cvar);
             for (uint32_t v = read.Next(); v; v = read.Next())
                 ids.push_back(v);
         }
         ids.push_back(id);
         if (ids.size() > 20)
             ids.erase(ids.begin(), ids.end() - 20);
-        IntList write(g_visited);
+        IntList write(cvar);
         for (uint32_t v : ids)
         {
             if (v > kMaxListValue)
@@ -335,9 +369,10 @@ namespace
 
     int __cdecl QuestChangeTick(void*)   // 0x10336340
     {
-        if (!g_track.fresh && g_lastQuest && g_lastQuest != g_track.quest && g_visited)
+        CVar* cvar = VisitedCVar();
+        if (!g_track.fresh && g_lastQuest && g_lastQuest != g_track.quest && cvar)
         {
-            IntList list(g_visited);
+            IntList list(cvar);
             list.Store();
         }
         g_lastQuest = g_track.quest;
@@ -359,8 +394,7 @@ namespace
 
     void OnEnterWorld()
     {
-        if (!g_visited)
-            g_visited = CVar::Lookup("VisitedSuperTracks");
+        VisitedCVar();   // resolve per world entry (the client may have moved its CVar arena meanwhile)
         // 0x103345A0 (world Lua init): tracker cleared, fresh, no last quest.
         g_track.quest = 0;
         g_track.target = Target{};
