@@ -181,8 +181,12 @@ namespace
         const uint8_t* display = *reinterpret_cast<uint8_t* const*>(go + 0x1A4);
         if (!display)
             return;
-        const uint8_t* row = AscDbc::Get("DBFilesClient/GameObjectDisplayInfoAddon.dbc").Row(*reinterpret_cast<const uint32_t*>(display + 4));
-        const char* name = row ? *reinterpret_cast<const char* const*>(row + 4) : nullptr;
+        // Rows of our own tables hold string-block OFFSETS (AscDbc.hpp): the name column must be
+        // resolved through Table::Str, not read as a pointer. Reading it as a pointer dereferenced a
+        // string-block offset (0x000DE965 in the 2026-09-28 Crash.txt) and killed the client.
+        AscDbc::Table& addon = AscDbc::Get("DBFilesClient/GameObjectDisplayInfoAddon.dbc");
+        const uint8_t* row = addon.Row(*reinterpret_cast<const uint32_t*>(display + 4));
+        const char* name = row ? addon.Str(row, 4) : nullptr;
         if (!name || !*name)
             return;
         uint32_t flagsObj;
